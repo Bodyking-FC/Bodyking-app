@@ -8619,9 +8619,11 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
         return out;
     }
     
+    // Sanciones: puntos que la organización le quita a un equipo (L.sanciones = { 'EQUIPO': 3 })
+    function ligaSancion(L, eq) { return Math.max(0, parseInt((L.sanciones || {})[eq], 10) || 0); }
     function ligaClasificacion(L, hastaJ) {
         const t = {};
-        L.equipos.forEach(e => { t[e] = { eq: e, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, pts: 0 }; });
+        L.equipos.forEach(e => { t[e] = { eq: e, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, pts: -ligaSancion(L, e), san: ligaSancion(L, e) }; });
         const res = (L.resultados || []).filter(r => t[r.l] && t[r.v] && r.l !== r.v && (!hastaJ || r.j <= hastaJ));
         res.forEach(r => {
             const a = t[r.l], b = t[r.v];
@@ -8654,6 +8656,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
     function ligaSimular(L, N) {
         N = N || 5000;
         const eqs = L.equipos, n = eqs.length;
+        const SAN = eqs.map(e => ligaSancion(L, e));
         const res = (L.resultados || []).filter(r => eqs.includes(r.l) && eqs.includes(r.v));
         const pend = ligaPendientes(L);
         const base = {}; eqs.forEach(e => { base[e] = { pj: 0, gf: 0, gc: 0 }; });
@@ -8663,7 +8666,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
         const K = 4; // peso de la media de la liga: al principio manda más, luego pesan los resultados
         const att = {}, def = {};
         eqs.forEach(e => { const b = base[e]; att[e] = (b.gf + K * mu) / (b.pj + K) / mu; def[e] = (b.gc + K * mu) / (b.pj + K) / mu; });
-        let h = 2166136261; const txt = JSON.stringify([eqs, res, N]);
+        let h = 2166136261; const txt = JSON.stringify(SAN.some(x => x) ? [eqs, res, N, SAN] : [eqs, res, N]);
         for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 16777619); }
         let s = h >>> 0;
         const rnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -8696,7 +8699,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
         const limiteSalva = n - (L.descienden || 0);
         for (let it = 0; it < N; it++) {
             for (let k = 0; k < P.length; k++) { GL[R0.length + k] = poisson(P[k][2]); GV[R0.length + k] = poisson(P[k][3]); }
-            pts.fill(0); gf.fill(0); gc.fill(0);
+            for (let i = 0; i < n; i++) pts[i] = -SAN[i]; gf.fill(0); gc.fill(0);
             for (let k = 0; k < total; k++) {
                 const l = RL[k], v = RV[k], a = GL[k], b = GV[k];
                 gf[l] += a; gc[l] += b; gf[v] += b; gc[v] += a;
@@ -8891,6 +8894,10 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
         try { L = JSON.parse(localStorage.getItem(LIGA_KEY) || 'null'); } catch (e) {}
         if (!L || !Array.isArray(L.equipos)) L = JSON.parse(JSON.stringify(LIGA_DEF));
         if (!Array.isArray(L.resultados)) L.resultados = [];
+        if (L.sanciones === undefined && L.equipos.includes('J. DE MUNICH')) {
+            L.sanciones = { 'J. DE MUNICH': 3 };
+            try { localStorage.setItem(LIGA_KEY, JSON.stringify(L)); } catch (e) {}
+        }
         return L;
     }
     function guardarLiga(L) {
@@ -8901,7 +8908,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
     const ligaNumJornadas = L => L.equipos.length % 2 ? L.equipos.length : L.equipos.length - 1;
     let _ligaSimCache = { k: null, r: null };
     function ligaSimCacheada(L) {
-        const k = JSON.stringify([L.equipos, L.resultados, L.nuestro, L.descienden]);
+        const k = JSON.stringify([L.equipos, L.resultados, L.nuestro, L.descienden, L.sanciones || null]);
         if (_ligaSimCache.k !== k) _ligaSimCache = { k, r: ligaSimular(L, 5000) };
         return _ligaSimCache.r;
     }
@@ -8965,7 +8972,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
                 <td style="padding:5px 4px; border-left:3px solid ${desc ? '#e53935' : 'transparent'};">${f.pos}</td>
                 <td style="padding:5px 4px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escL(f.eq)}</td>
                 <td style="text-align:center;">${f.pj}</td><td style="text-align:center;">${f.g}</td><td style="text-align:center;">${f.e}</td><td style="text-align:center;">${f.p}</td>
-                <td style="text-align:center;">${f.gf}:${f.gc}</td><td style="text-align:center; font-weight:900;">${f.pts}</td></tr>`;
+                <td style="text-align:center;">${f.gf}:${f.gc}</td><td style="text-align:center; font-weight:900;">${f.pts}${f.san ? '<sup style="color:#e53935;">*</sup>' : ''}</td></tr>`;
         }).join('');
         const porJ = {};
         L.resultados.forEach((r, i) => { (porJ[r.j] = porJ[r.j] || []).push({ ...r, i }); });
@@ -8984,6 +8991,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
                     <thead><tr style="color:#888; font-size:0.65rem;"><th style="text-align:left;">#</th><th style="text-align:left;">Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>Goles</th><th>Pts</th></tr></thead>
                     <tbody>${filas}</tbody></table></div>
                 <div style="font-size:0.66rem; color:#888; margin-top:6px;">Borde rojo: zona de descenso. Desempate: enfrentamiento directo, luego diferencia de goles y goles a favor.</div>
+                ${tabla.some(f => f.san) ? `<div style="font-size:0.68rem; color:#e53935; margin-top:4px;">* Sanción: ${tabla.filter(f => f.san).map(f => `${escL(f.eq)} −${f.san} pts`).join(' · ')}</div>` : ''}
             </div>
             ${htmlProximoLiga(L, caja, tit)}
             <div style="${caja}" id="liga-sim">${tit('🎲 Simulación del resto de la liga')}<div style="font-size:0.78rem; color:#888;">Calculando…</div></div>
@@ -9009,11 +9017,36 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
                     <label>Nuestro equipo</label><select id="liga-nuestro" style="${inp}">${L.equipos.map(e => `<option${e === L.nuestro ? ' selected' : ''}>${escL(e)}</option>`).join('')}</select>
                     <label>Cuántos bajan</label><input id="liga-desc" type="number" min="0" value="${L.descienden}" style="${inp} width:80px;">
                     <button onclick="guardarAjustesLiga()" style="background:#0288d1; color:#fff; border:none; border-radius:8px; padding:9px; font-weight:900; cursor:pointer;">Guardar ajustes</button>
+                    <label style="margin-top:8px; font-weight:900;">⚖️ Sanciones (puntos que se le quitan a un equipo)</label>
+                    ${Object.keys(L.sanciones || {}).filter(e => ligaSancion(L, e)).map(e => `<div style="display:flex; align-items:center; gap:6px;"><span style="flex:1;">${escL(e)}: <b style="color:#e53935;">−${ligaSancion(L, e)} pts</b></span><button onclick="quitarSancionLiga('${escL(e).replace(/'/g, "\\'")}')" style="background:none; border:1px solid var(--border-color); color:#e53935; border-radius:6px; padding:2px 7px; cursor:pointer;">✕</button></div>`).join('') || '<span style="color:#888;">Ningún equipo sancionado.</span>'}
+                    <div style="display:grid; grid-template-columns:1fr 64px auto; gap:6px; align-items:center;">
+                        <select id="liga-san-eq" style="${inp}">${optsEq}</select>
+                        <input id="liga-san-pts" type="number" min="0" inputmode="numeric" placeholder="pts" style="${inp} width:100%; box-sizing:border-box;">
+                        <button onclick="aplicarSancionLiga()" style="background:#e53935; color:#fff; border:none; border-radius:8px; padding:8px 10px; font-weight:900; cursor:pointer;">Aplicar</button>
+                    </div>
                 </div>
             </details>`;
         const sel = document.getElementById('liga-v'); if (sel && sel.options.length > 1) sel.selectedIndex = 1;
         pintarJornadaLiga();
         setTimeout(() => pintarSimulacionLiga(L), 30);
+    }
+
+    function aplicarSancionLiga() {
+        const L = obtenerLiga();
+        const eq = document.getElementById('liga-san-eq').value;
+        const pts = Math.max(0, parseInt(document.getElementById('liga-san-pts').value, 10) || 0);
+        L.sanciones = Object.assign({}, L.sanciones || {});
+        if (pts) L.sanciones[eq] = pts; else delete L.sanciones[eq];
+        guardarLiga(L);
+        lanzarToastAlerta(pts ? `⚖️ ${eq}: −${pts} pts` : `⚖️ Sanción de ${eq} quitada`);
+        renderTabLiga(document.getElementById('modal-temporada-contenido'));
+    }
+    function quitarSancionLiga(eq) {
+        const L = obtenerLiga();
+        if (L.sanciones) delete L.sanciones[eq];
+        guardarLiga(L);
+        lanzarToastAlerta(`⚖️ Sanción de ${eq} quitada`);
+        renderTabLiga(document.getElementById('modal-temporada-contenido'));
     }
 
     let _ligaJSel = null;
