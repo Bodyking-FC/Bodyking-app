@@ -2,7 +2,7 @@
    - La página: primero internet (siempre la última versión); si tarda más de 4 s o no hay cobertura, la guardada.
    - Iconos, librería del PDF y letras: guardados en el móvil.
    - Firebase y la IA no pasan por aquí (siempre en directo). */
-const CACHE = 'bodyking-app-v1';
+const CACHE = 'bodyking-app-v2';
 const NUCLEO = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 const EXTERNOS = ['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'];
 
