@@ -8568,7 +8568,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
     const LIGA_DEF = {
         nombre: 'F7 · 4ª División Apertura · Grupo II',
         equipos: ['BODY KING', 'CDV', 'NEWCAMEL FC', 'DAVID GARRIDO EVENTOS', 'SPORTING 593', 'J. DE MUNICH',
-            'REVENTAOS CF', 'EL RINCÓN DE LA VENTA FC', 'APOLO II', 'RACING LAS VEGAS', 'ORFEO FC'],
+            'REVENTAOS CF', 'EL RINCÓN DE LA VENTA FC', 'APOLO II', 'RACING LAS VEGAS', 'ORFEO FC', 'CABRITOS FC'],
         nuestro: 'BODY KING',
         descienden: 5,
         resultados: [
@@ -8799,63 +8799,74 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
     
     // Calendario oficial (Futormes). Formato: jornada|fecha|hora|campo|local|visitante
     const LIGA_COD = { DG: 'DAVID GARRIDO EVENTOS', RV: 'REVENTAOS CF', CDV: 'CDV', RLV: 'RACING LAS VEGAS', AP: 'APOLO II', NC: 'NEWCAMEL FC',
-        BK: 'BODY KING', OR: 'ORFEO FC', RI: 'EL RINCÓN DE LA VENTA FC', SP: 'SPORTING 593', JM: 'J. DE MUNICH' };
+        BK: 'BODY KING', OR: 'ORFEO FC', RI: 'EL RINCÓN DE LA VENTA FC', SP: 'SPORTING 593', JM: 'J. DE MUNICH', CAB: 'CABRITOS FC' };
     const LIGA_CAL_DEF = `
     1|2026-09-26|19:00|AB1|DG|RV
     1|2026-09-27|16:00|AB2|CDV|RLV
     1|2026-09-27|17:00|AB1|AP|NC
     1|2026-09-27|17:00|AB2|BK|OR
     1|2026-09-27|18:00|AA2|RI|SP
+    1|2026-09-26|||JM|CAB
     2|2026-10-03|20:00|BRA|NC|JM
     2|2026-10-04|16:00|AA2|RLV|BK
     2|2026-10-04|17:00|AA1|OR|AP
-    2|2026-10-04|18:00|AC2|RV|CDV
+    2|2026-10-25|19:05|AB1|RV|CDV
     2|2026-10-04|19:00|AC1|SP|DG
+    2|2026-10-03|||RI|CAB
     3|2026-10-17|17:00|BRA|AP|RLV
     3|2026-10-17|19:00|AC2|NC|OR
     3|2026-10-18|13:00|AC2|BK|RV
     3|2026-10-18|17:00|AA1|CDV|SP
     3|2026-10-18|18:00|AA1|JM|RI
+    3|2026-10-17|||DG|CAB
     4|2026-10-25|13:00|AC2|SP|BK
     4|2026-10-25|17:00|AA1|RI|DG
     4|2026-10-25|17:00|AA2|OR|JM
     4|2026-10-25|17:00|AB2|RLV|NC
     4|2026-10-25|18:00|AA2|RV|AP
+    4|2026-10-25|18:00|AB1|CDV|CAB
     5|2026-11-07|16:00|AC2|NC|RV
     5|2026-11-07|17:00|AC1|AP|SP
     5|2026-11-08|16:00|BRA|OR|RLV
     5|2026-11-08|17:00|BRA|CDV|RI
     5|2026-11-08|18:00|BRA|JM|DG
+    5|2026-11-07|||BK|CAB
     6|2026-11-15|12:00|AC2|RV|OR
     6|2026-11-15|16:00|AC2|RLV|JM
     6|2026-11-15|17:00|AC1|RI|BK
     6|2026-11-15|17:00|AC2|SP|NC
     6|2026-11-15|18:00|AC1|DG|CDV
+    6|2026-11-15|||AP|CAB
     7|2026-11-21|16:00|AC2|AP|RI
     7|2026-11-22|10:00|BRA|BK|DG
     7|2026-11-22|16:00|AA1|RLV|RV
     7|2026-11-22|18:00|AC2|JM|CDV
     7|2026-11-22|19:00|AC2|OR|SP
+    7|2026-11-21|||NC|CAB
     8|2026-11-29|11:00|AC2|RV|JM
     8|2026-11-29|13:00|AC2|SP|RLV
     8|2026-11-29|16:00|AA2|RI|NC
     8|2026-11-29|17:00|AA1|DG|AP
     8|2026-11-29|17:00|AA2|CDV|BK
+    8|2026-11-29|||OR|CAB
     9|2026-12-12|17:00|AC2|NC|DG
     9|2026-12-12|17:00|BRA|AP|CDV
     9|2026-12-12|19:00|BRA|JM|BK
     9|2026-12-13|17:00|AC1|RV|SP
     9|2026-12-13|17:00|AC2|OR|RI
+    9|2026-12-12|||RLV|CAB
     10|2026-12-20|10:00|AC2|BK|AP
     10|2026-12-20|17:00|AA1|CDV|NC
     10|2026-12-20|17:00|AA2|JM|SP
     10|2026-12-20|18:00|AA1|DG|OR
     10|2026-12-20|18:00|AA2|RI|RLV
+    10|2026-12-20|||RV|CAB
     11|2027-01-10|||OR|CDV
     11|2027-01-10|||AP|JM
     11|2027-01-10|||NC|BK
     11|2027-01-10|||RV|RI
     11|2027-01-10|||RLV|DG
+    11|2027-01-10|||SP|CAB
     `.trim().split('\n').map(x => { const [j, fecha, hora, campo, a, b] = x.split('|'); return { j: +j, fecha, hora, campo, l: LIGA_COD[a], v: LIGA_COD[b] }; });
     LIGA_DEF.calendario = LIGA_CAL_DEF;
     
@@ -8872,7 +8883,11 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
     }
     function ligaJornadaEnCurso(L) {
         const pend = ligaCalendario(L).filter(m => !ligaResultadoDe(L, m.l, m.v));
-        return pend.length ? Math.min(...pend.map(m => m.j)) : null;
+        // Los partidos atrasados (aplazados o de un equipo que entró tarde) no cuentan para saber la jornada actual
+        const act = ligaJornadaActual(L), limite = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+        const alDia = pend.filter(m => m.j >= act && (!m.fecha || m.fecha >= limite));
+        const base = alDia.length ? alDia : pend;
+        return base.length ? Math.min(...base.map(m => m.j)) : null;
     }
     function ligaDescansa(L, j) {
         const ms = ligaCalendario(L).filter(m => m.j === j);
@@ -8894,6 +8909,12 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
         try { L = JSON.parse(localStorage.getItem(LIGA_KEY) || 'null'); } catch (e) {}
         if (!L || !Array.isArray(L.equipos)) L = JSON.parse(JSON.stringify(LIGA_DEF));
         if (!Array.isArray(L.resultados)) L.resultados = [];
+        // Octubre 2026: entra CABRITOS FC (12 equipos). Se añade solo con su calendario.
+        if (!L.equipos.includes('CABRITOS FC') && L.equipos.length === 11 && LIGA_DEF.equipos.filter(e => e !== 'CABRITOS FC').every(e => L.equipos.includes(e))) {
+            L.equipos.push('CABRITOS FC');
+            L.calendario = LIGA_CAL_DEF;
+            try { localStorage.setItem(LIGA_KEY, JSON.stringify(L)); } catch (e) {}
+        }
         if (L.sanciones === undefined && L.equipos.includes('J. DE MUNICH')) {
             L.sanciones = { 'J. DE MUNICH': 3 };
             try { localStorage.setItem(LIGA_KEY, JSON.stringify(L)); } catch (e) {}
