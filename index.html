@@ -633,6 +633,18 @@
                 </div>
                 <button style="background:#455a64; width:100%; margin-top:6px;" onclick="abrirPartidoAMano()">✍️ METER UN PARTIDO A MANO (si no se grabó en directo)</button>
             </div>
+            <div class="categoria-botones cat-plantilla" style="margin-top:10px; border-left-color:#ff6f00;">
+                <div class="categoria-titulo">🤝 Delegado (si no puedes ir)</div>
+                <div id="estado-delegado" style="font-size:0.74rem; font-weight:700; margin:0 0 8px 0; text-align:center; line-height:1.4;"></div>
+                <div class="grid-botones">
+                    <button style="background:#ff6f00;" onclick="pasarAlDelegado()">📲 PASAR AL DELEGADO</button>
+                    <button style="background:#00897b;" onclick="cargarPartidoDelegado()">📥 CARGAR SU PARTIDO</button>
+                </div>
+                <div class="grid-botones" style="margin-top:6px;">
+                    <button style="background:#6d4c41;" onclick="mandarPruebaDelegado()">🧪 MANDAR PRUEBA</button>
+                    <button style="background:#546e7a;" onclick="verPruebaDelegado()">👀 VER PRUEBA</button>
+                </div>
+            </div>
             </div>
 
             <div class="pantalla-tab" id="tabscreen-plantilla">
@@ -1089,6 +1101,8 @@
     let jornada = "";
     let partidoVolcadoATemporada = false;
     let duracionRealMinutos = null;
+    let _reproduciendo = false;        // true mientras se reproduce el partido del delegado (sin avisos ni guardados)
+    let _fechaPartidoForzada = null;   // fecha real del partido cuando lo registró el delegado
     
     let fichaSeleccionadaId = null; 
     let banquilloSeleccionadoNombre = null; 
@@ -1135,6 +1149,7 @@
     function actualizarBannerSanciones() { /* no-op */ }
 
     function guardarEstadoPartidoEmergencia() {
+        if (_reproduciendo) return;
         // Calcular segundos reales hasta ahora (incluyendo fracción no volcada aún)
         let segundosReales = tiempoPartidoSegundos;
         if (enMarcha && _timerInicioMs) {
@@ -1146,7 +1161,7 @@
             timestampGuardado: Date.now(),
             golesHergar, golesRival, tipoPartido, nombreRivalActual, jornada,
             jugadores, matrizSinergiasParejas, trackingRachasPortero, eventosTimeline, partidoVolcadoATemporada,
-            duracionRealMinutos, duracionTotalMinutos,
+            duracionRealMinutos, duracionTotalMinutos, fechaForzada: _fechaPartidoForzada,
             _segundosAcumulados: segundosReales
         };
         localStorage.setItem('hergar_estado_emergencia', JSON.stringify(estado));
@@ -1172,6 +1187,7 @@
             eventosTimeline = estado.eventosTimeline || [];
             partidoVolcadoATemporada = estado.partidoVolcadoATemporada || false;
             duracionRealMinutos = estado.duracionRealMinutos || null;
+            _fechaPartidoForzada = estado.fechaForzada || null;
             if (estado.duracionTotalMinutos) {
                 duracionTotalMinutos = estado.duracionTotalMinutos;
                 const sel = document.getElementById('duracion-partido');
@@ -1362,6 +1378,7 @@
         historialSustituciones = [];
         partidoVolcadoATemporada = false;
         duracionRealMinutos = null;
+        _fechaPartidoForzada = null;
         document.getElementById('banner-finalizado').style.display = 'none';
         _segundosAcumulados = 0;
         _timerInicioMs = null;
@@ -1705,6 +1722,7 @@
     }
 
     function verificarAlertasTiempo() {
+        if (_reproduciendo) return;
         const durSeg = duracionTotalMinutos * 60;
         const restantes = durSeg - tiempoPartidoSegundos;
         
@@ -2459,7 +2477,7 @@
         const _selNivelRival = document.getElementById('ia-nivel-rival');
 
         let registroPartido = {
-            fecha: new Date().toLocaleDateString('es-ES'),
+            fecha: _fechaPartidoForzada || new Date().toLocaleDateString('es-ES'),
             rival: nombreRivalActual,
             golesH: golesHergar,
             golesR: golesRival,
@@ -3000,6 +3018,7 @@
     function desbloquearScrollFondo() { document.body.style.overflow = ''; }
 
     function lanzarToastAlerta(msg) {
+        if (_reproduciendo) return;
         const c = document.getElementById('toast-container'); if (!c) return;
         const alertDiv = document.createElement('div'); alertDiv.className = "toast-alerta";
         alertDiv.innerHTML = `<span>📢</span> <span>${msg}</span>`; c.appendChild(alertDiv);
@@ -3007,6 +3026,7 @@
     }
 
     function lanzarToastCambioFlotante(sale, entra) {
+        if (_reproduciendo) return;
         const t = document.getElementById('toast-cambio'); if (!t) return;
         t.innerHTML = `<span style="color:#ff5252; font-weight:bold;">🔴 Sale: ${sale}</span><span style="color:#aaa;">   </span><span style="color:#69f0ae; font-weight:bold;">🟢 Entra: ${entra}</span>`;
         t.classList.add('visible'); setTimeout(() => { t.classList.remove('visible'); }, 3000);
@@ -7562,6 +7582,377 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
         togglePartido();
     }
 
+    /* ── DELEGADO: otra persona registra el partido en delegado.html (visor) ──
+       1. 📲 Pasar al delegado: se sube la convocatoria a bodyking/delegado/CÓDIGO
+          y se manda por WhatsApp el enlace + un código de 4 cifras.
+       2. El delegado apunta el partido (se ve en directo en el visor).
+       3. 📥 Cargar su partido: la app REPRODUCE segundo a segundo lo que apuntó,
+          con su propio motor (minutos por posición, impacto, parejas, +/-…),
+          y queda listo para revisar y grabar como si lo hubieras hecho tú. */
+    const DELEGADO_URL_DEF = 'https://javigarblanc-blip.github.io/Bodyking-visor/delegado.html';
+    const DELEGADO_RUTA = 'bodyking/delegado';
+
+    function obtenerDelegado() { try { return JSON.parse(localStorage.getItem('bodyking_delegado_actual') || 'null'); } catch (e) { return null; } }
+    function guardarDelegadoLocal(d) { try { localStorage.setItem('bodyking_delegado_actual', JSON.stringify(d)); } catch (e) {} actualizarEstadoDelegado(); }
+
+    function urlDelegado(codigo) {
+        const cfg = obtenerConfigVisor();
+        let base = DELEGADO_URL_DEF;
+        try { if (cfg.url) base = new URL('delegado.html', cfg.url).href; } catch (e) {}
+        return base + '?m=' + codigo + (cfg.db && cfg.db !== VISOR_DB_DEF ? '&db=' + encodeURIComponent(cfg.db) : '');
+    }
+    function nuevoCodigoDelegado() {
+        const abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+        const a = new Uint8Array(8);
+        try { crypto.getRandomValues(a); } catch (e) { for (let i = 0; i < 8; i++) a[i] = Math.floor(Math.random() * 256); }
+        return Array.from(a, x => abc[x % abc.length]).join('');
+    }
+    async function leerNodoDelegado(cfg, codigo, campo) {
+        const r = await fetchConTiempo(`${cfg.db}/${DELEGADO_RUTA}/${codigo}/${campo}.json`, 12000);
+        if (!r.ok) throw new Error('la base de datos no deja leer (error ' + r.status + ')');
+        return r.json();
+    }
+
+    function actualizarEstadoDelegado(txtExtra) {
+        const el = document.getElementById('estado-delegado');
+        if (!el) return;
+        const d = obtenerDelegado();
+        let txt, col;
+        if (txtExtra) { txt = txtExtra; col = '#ff6f00'; }
+        else if (!d) { txt = 'Si no puedes ir, pásale el partido a otra persona: lo apunta desde el móvil sin instalar nada.'; col = '#888'; }
+        else if (d.abierto !== false) { txt = `📲 Preparado para el delegado: vs ${d.rival} · código ${d.pin}`; col = '#ff6f00'; }
+        else { txt = `✅ Último partido del delegado ya cargado (vs ${d.rival})`; col = '#2e7d32'; }
+        el.textContent = txt; el.style.color = col;
+    }
+
+    async function pasarAlDelegado() {
+        const cfg = obtenerConfigVisor();
+        if (!cfg.db || !cfg.clave) { lanzarToastAlerta('⚠️ Hace falta la clave del visor (Ajustes → Visor online).'); cambiarTabPrincipal('visual'); return; }
+        if (enMarcha || tiempoPartidoSegundos > 0) { lanzarToastAlerta('⚠️ El partido ya ha empezado en este móvil: el delegado se prepara antes de empezar.'); return; }
+        if (jugadores.length === 0) { lanzarToastAlerta('⚠️ Haz primero la convocatoria (Plantilla → Convocatoria).'); return; }
+        let rival = (nombreRivalActual && nombreRivalActual !== 'RIVAL') ? nombreRivalActual : ((document.getElementById('input-rival-setup') || {}).value || '').trim();
+        if (!rival) {
+            rival = await hergarPrompt('¿Contra quién se juega?', '');
+            if (!rival) return;
+        }
+        nombreRivalActual = rival;
+        document.getElementById('nombre-rival-marcador').innerText = rival;
+        try { localStorage.setItem('hergar_rival_actual', rival); } catch (e) {}
+
+        const fechaEl = document.getElementById('input-fecha-setup');
+        const fecha = (fechaEl && fechaEl.value.trim()) || new Date().toLocaleDateString('es-ES');
+        const previo = obtenerDelegado();
+        let codigo = null, pin = null, soloReenviar = false;
+        actualizarEstadoDelegado('⏳ Preparando…');
+        try {
+            if (previo && previo.abierto !== false) {
+                let stTxt = null;
+                try { stTxt = await leerNodoDelegado(cfg, previo.codigo, 'st'); } catch (e) {}
+                const st = stTxt ? JSON.parse(stTxt) : null;
+                const empezado = st && st.fase !== 'alineacion';
+                if (previo.rival === rival && previo.fecha === fecha) {
+                    codigo = previo.codigo; pin = previo.pin;
+                    if (empezado) soloReenviar = true; // ya está apuntando: no se toca su partido
+                } else if (empezado && (st.ev || []).length) {
+                    const ok = await hergarConfirm(`⚠️ Tienes sin cargar el partido del delegado vs ${previo.rival}.\n\nCárgalo antes (📥 CARGAR SU PARTIDO) o se quedará sin pasar a la temporada.\n\n¿Preparar igualmente uno nuevo vs ${rival}?`, 'Preparar nuevo', 'var(--danger)');
+                    if (!ok) { actualizarEstadoDelegado(); return; }
+                }
+            }
+            if (!codigo) { codigo = nuevoCodigoDelegado(); pin = String(1000 + Math.floor(Math.random() * 9000)); }
+
+            if (!soloReenviar) {
+                const plantilla = (localStorage.getItem('hergar_nombres_plantilla') || nombresPlantillaCompleta || '')
+                    .split(',').map(t => parsearJugadorToken(t)).filter(j => j.nombre).map(j => ({ n: j.nombre, d: j.dorsal }));
+                const once = [0, 1, 2, 3, 4, 5, 6].map(i => { const j = jugadores.find(x => x.enCampo && x.posicionActual === i); return j ? j.nombre : null; });
+                const cfgDel = {
+                    v: 1, pin, rival, jornada: jornada || '', tipo: tipoPartido, duracion: duracionTotalMinutos, fecha,
+                    sistema: sistemaActual.id, plantilla, convocados: jugadores.map(j => j.nombre), once, creado: Date.now()
+                };
+                const r = await fetch(`${cfg.db}/${DELEGADO_RUTA}/${codigo}.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clave: cfg.clave, abierto: true, cfg: JSON.stringify(cfgDel), creado: Date.now() }) });
+                if (!r.ok) {
+                    if (r.status === 401 || r.status === 403) throw new Error('Firebase no deja guardar el partido del delegado: falta añadir la parte del delegado en las reglas');
+                    throw new Error('error ' + r.status);
+                }
+            }
+            guardarDelegadoLocal({ codigo, pin, rival, fecha, ts: Date.now(), abierto: true });
+        } catch (e) {
+            const det = (e && e.message && e.message !== 'Failed to fetch') ? e.message : 'sin conexión';
+            lanzarToastAlerta('⚠️ No se pudo preparar: ' + det);
+            actualizarEstadoDelegado('⚠️ ' + det);
+            return;
+        }
+
+        const enlace = urlDelegado(codigo);
+        const texto = `🤝 Delegado de Bodyking FC\n\nPartido: Bodyking vs ${rival} · ${fecha}\n\n1️⃣ Abre este enlace en el móvil (no hay que instalar nada):\n${enlace}\n\n2️⃣ Código: ${pin}\n\nAntes de empezar, marca quién ha venido y coloca a los 7 titulares. Luego: ▶ Empezar, apunta goles y cambios, ⏱️ 2ª parte en el descanso y 🏁 Terminar al final. Se envía todo solo.`;
+        if (navigator.share) {
+            try { await navigator.share({ title: 'Bodyking FC — Delegado', text: texto }); return; }
+            catch (e) { if (e && e.name === 'AbortError') return; }
+        }
+        try { await navigator.clipboard.writeText(texto); lanzarToastAlerta('📋 Mensaje copiado: pégalo en WhatsApp'); }
+        catch (e) { await hergarConfirm(texto, 'Cerrar', '#455a64'); }
+    }
+
+    async function cargarPartidoDelegado() {
+        const cfg = obtenerConfigVisor();
+        if (!cfg.db || !cfg.clave) { lanzarToastAlerta('⚠️ Hace falta la clave del visor (Ajustes → Visor online).'); cambiarTabPrincipal('visual'); return; }
+        if (enMarcha) { lanzarToastAlerta('⚠️ Pausa el partido de este móvil antes de cargar el del delegado.'); return; }
+        const d = obtenerDelegado();
+        let codigo = d && d.codigo;
+        if (!codigo) {
+            const t = await hergarPrompt('Código del partido (lo que va detrás de «m=» en el enlace del delegado):', '');
+            if (!t) return;
+            codigo = t.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        }
+        actualizarEstadoDelegado('⏳ Descargando…');
+        let cfgTxt, stTxt;
+        try { [cfgTxt, stTxt] = await Promise.all([leerNodoDelegado(cfg, codigo, 'cfg'), leerNodoDelegado(cfg, codigo, 'st')]); }
+        catch (e) { lanzarToastAlerta('⚠️ No se pudo descargar: ' + ((e && e.message !== 'Failed to fetch' && e.message) || 'sin conexión')); actualizarEstadoDelegado(); return; }
+        actualizarEstadoDelegado();
+        if (!cfgTxt) { lanzarToastAlerta('⚠️ No hay ningún partido del delegado con ese código.'); return; }
+        const st = stTxt ? JSON.parse(stTxt) : null, cd = JSON.parse(cfgTxt);
+        if (cd.prueba) { lanzarToastAlerta('🧪 Ese código es de una prueba: míralo con 👀 VER PRUEBA.'); return; }
+        if (!st || st.fase === 'alineacion') { lanzarToastAlerta('⏳ El delegado aún no ha empezado el partido.'); return; }
+
+        const seg = st.acum + (st.desde ? Math.floor((Date.now() - st.desde) / 1000) : 0);
+        if (st.fase !== 'final') {
+            const ok = await hergarConfirm(`⏳ El delegado aún no ha terminado (va por el minuto ${Math.floor(seg / 60) + 1}, ${st.gl}-${st.gr}).\n\n¿Cargar lo que lleva? Al acabar tendrás que cargarlo otra vez.`, 'Cargar lo que lleva', '#00897b');
+            if (!ok) return;
+        }
+        const yaGrabado = historialPartidos.some(p => p.fecha === cd.fecha && (p.rival || '').trim().toLowerCase() === (cd.rival || '').trim().toLowerCase());
+        let aviso = `📥 Partido del delegado:\nBodyking ${st.gl}-${st.gr} ${cd.rival} · ${cd.fecha}\n${(st.ev || []).filter(e => e.k !== 'fin').length} acciones apuntadas.`;
+        if (yaGrabado) aviso += `\n\n⚠️ Ya tienes grabado en la temporada un partido vs ${cd.rival} con esa fecha.`;
+        if (hayPartidoEnJuego()) aviso += `\n\n⚠️ Se sustituye el partido que hay ahora en este móvil.`;
+        aviso += `\n\nSe cargará en la pantalla de partido para que lo revises; después pulsa 💾 GRABAR PARTIDO.`;
+        if (!(await hergarConfirm(aviso, '📥 Cargar', '#00897b'))) return;
+
+        try { reproducirPartidoDelegado(cd, st); }
+        catch (e) { console.error(e); lanzarToastAlerta('❌ Error al reproducir el partido: ' + e.message); return; }
+
+        if (st.fase === 'final') {
+            // Se cierra: el enlace del delegado pasa a solo lectura
+            try {
+                await fetch(`${cfg.db}/${DELEGADO_RUTA}/${codigo}.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clave: cfg.clave, abierto: false, cfg: cfgTxt, st: stTxt, cargado: Date.now() }) });
+            } catch (e) {}
+            guardarDelegadoLocal(Object.assign({}, d || { codigo, pin: cd.pin, rival: cd.rival, fecha: cd.fecha }, { abierto: false }));
+        }
+    }
+
+    /* ── PRUEBA PARA EL DELEGADO: mismo enlace y pantallas, pero no sale en el visor
+       y aquí solo se mira (no se carga en el partido ni en la temporada). ── */
+    function obtenerPruebaDelegado() { try { return JSON.parse(localStorage.getItem('bodyking_delegado_prueba') || 'null'); } catch (e) { return null; } }
+
+    async function mandarPruebaDelegado() {
+        const cfg = obtenerConfigVisor();
+        if (!cfg.db || !cfg.clave) { lanzarToastAlerta('⚠️ Hace falta la clave del visor (Ajustes → Visor online).'); cambiarTabPrincipal('visual'); return; }
+        const plantilla = (localStorage.getItem('hergar_nombres_plantilla') || nombresPlantillaCompleta || '')
+            .split(',').map(t => parsearJugadorToken(t)).filter(j => j.nombre).map(j => ({ n: j.nombre, d: j.dorsal }));
+        const convocados = jugadores.length ? jugadores.map(j => j.nombre) : plantilla.map(p => p.n);
+        const once = [0, 1, 2, 3, 4, 5, 6].map(i => { const j = jugadores.find(x => x.enCampo && x.posicionActual === i); return j ? j.nombre : null; });
+        const codigo = nuevoCodigoDelegado(), pin = String(1000 + Math.floor(Math.random() * 9000));
+        const fecha = new Date().toLocaleDateString('es-ES');
+        const cfgDel = { v: 1, prueba: true, pin, rival: 'Prueba', jornada: 'Partido de prueba', tipo: 'amistoso', duracion: duracionTotalMinutos, fecha,
+            sistema: sistemaActual.id, plantilla, convocados, once, creado: Date.now() };
+        try {
+            const r = await fetch(`${cfg.db}/${DELEGADO_RUTA}/${codigo}.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clave: cfg.clave, abierto: true, prueba: true, cfg: JSON.stringify(cfgDel), creado: Date.now() }) });
+            if (!r.ok) throw new Error((r.status === 401 || r.status === 403) ? 'Firebase no deja guardar: falta la parte del delegado en las reglas' : 'error ' + r.status);
+        } catch (e) {
+            lanzarToastAlerta('⚠️ No se pudo preparar la prueba: ' + ((e && e.message !== 'Failed to fetch' && e.message) || 'sin conexión'));
+            return;
+        }
+        try { localStorage.setItem('bodyking_delegado_prueba', JSON.stringify({ codigo, pin, ts: Date.now() })); } catch (e) {}
+        actualizarEstadoDelegado();
+        const texto = `🧪 PRUEBA · Delegado de Bodyking FC\n\nEs un partido de práctica: no sale en el visor ni cuenta para nada. Toca todo lo que quieras.\n\n1️⃣ Abre este enlace en el móvil (no hay que instalar nada):\n${urlDelegado(codigo)}\n\n2️⃣ Código: ${pin}\n\nMarca quién ha venido, coloca a los 7 titulares y prueba: ▶ Empezar, goles, cambios (toca uno del banquillo y luego al que sale), ⏱️ 2ª parte y 🏁 Terminar.`;
+        if (navigator.share) {
+            try { await navigator.share({ title: 'Bodyking FC — Prueba de delegado', text: texto }); return; }
+            catch (e) { if (e && e.name === 'AbortError') return; }
+        }
+        try { await navigator.clipboard.writeText(texto); lanzarToastAlerta('📋 Mensaje de prueba copiado: pégalo en WhatsApp'); }
+        catch (e) { await hergarConfirm(texto, 'Cerrar', '#455a64'); }
+    }
+
+    async function verPruebaDelegado() {
+        const cfg = obtenerConfigVisor(), pr = obtenerPruebaDelegado();
+        if (!pr) { lanzarToastAlerta('ℹ️ Aún no has mandado ninguna prueba (🧪 MANDAR PRUEBA).'); return; }
+        let cfgTxt, stTxt;
+        try { [cfgTxt, stTxt] = await Promise.all([leerNodoDelegado(cfg, pr.codigo, 'cfg'), leerNodoDelegado(cfg, pr.codigo, 'st')]); }
+        catch (e) { lanzarToastAlerta('⚠️ No se pudo descargar la prueba: ' + ((e && e.message !== 'Failed to fetch' && e.message) || 'sin conexión')); return; }
+        if (!cfgTxt) { lanzarToastAlerta('⚠️ La prueba ya no existe. Manda otra.'); return; }
+        const st = stTxt ? JSON.parse(stTxt) : null, cd = JSON.parse(cfgTxt);
+        if (!st || !(st.ev || []).length) {
+            lanzarToastAlerta(st ? `⏳ El delegado está en la prueba (${st.fase === 'alineacion' ? 'preparando la alineación' : 'aún sin apuntar nada'})` : '⏳ El delegado aún no ha abierto la prueba');
+            return;
+        }
+        const dors = {}; (cd.plantilla || []).forEach(p => { dors[p.n] = p.d; });
+        const ev = (st.ev || []).filter(e => e.k !== 'fin');
+        const c = (n, k) => ev.filter(e => e.k === k && e.j === n).length;
+        const filas = (st.vinieron || []).map(n => ({ n, min: Math.floor(((st.secs || {})[n] || 0) / 60),
+            g: c(n, 'gol'), a: ev.filter(e => e.k === 'gol' && e.a === n).length, rec: c(n, 'rec'), per: c(n, 'per'), tir: c(n, 'tir'), par: c(n, 'par'),
+            tj: '🟨'.repeat(c(n, 'am')) + '🟥'.repeat(c(n, 'ro')) })).filter(f => f.min || f.g || f.a || f.rec || f.per || f.tir || f.par || f.tj)
+            .sort((a, b) => b.min - a.min);
+        const sistemaN = id => (SISTEMAS_JUEGO.find(x => x.id === id) || {}).nombre || id;
+        const txtEv = e => ({ gol: `⚽ Gol de ${e.j}${e.a ? ` (asist. ${e.a})` : ''}`, golR: '⚽ Gol del rival', sub: e.s ? `🔄 Entra ${e.e} · sale ${e.s}` : `➕ ${e.e} al campo`,
+            swap: `↔️ Cambian de sitio ${e.a1} y ${e.a2}`, am: `🟨 ${e.j}`, ro: `🟥 ${e.j}`, tir: `🎯 Tiro de ${e.j}`, rec: `✅ Recuperación de ${e.j}`,
+            per: `❌ Pérdida de ${e.j}`, par: `🧤 Parada de ${e.j}`, cf: '⛳ Córner a favor', cc: '⛳ Córner en contra', seg: '⏱️ Descanso',
+            sis: `📐 Sistema: ${e.de || ''} → ${e.a || sistemaN(e.s)}`, llega: `➕ Llega ${e.j}` }[e.k] || e.k);
+        const estado = st.fase === 'final' ? 'TERMINADA' : 'EN CURSO';
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:99990; display:flex; align-items:flex-start; justify-content:center; padding:12px; overflow-y:auto;';
+        const td = 'padding:5px 4px; text-align:center; border-bottom:1px solid var(--border-color);';
+        ov.innerHTML = `<div style="background:var(--panel-bg); color:var(--texto-general); border-radius:16px; max-width:460px; width:100%; overflow:hidden; border-top:4px solid #ff6f00; margin:auto;">
+            <div style="background:var(--bk-ink-2); color:var(--bk-chalk); padding:12px 16px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-family:'Oswald',sans-serif; font-weight:700;">🧪 PRUEBA DEL DELEGADO · ${estado}</span>
+                <button data-cerrar="1" style="background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:50%; width:30px; height:30px; cursor:pointer;">✕</button>
+            </div>
+            <div style="padding:12px 14px 16px;">
+                <div style="text-align:center; font-family:'Oswald',sans-serif; font-size:2rem; font-weight:700;">${st.gl} – ${st.gr}</div>
+                <p style="font-size:0.72rem; color:#888; text-align:center; margin:0 0 10px;">Solo para ver: no se carga en el partido ni en la temporada, y no ha salido en el visor.</p>
+                <div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:0.74rem;">
+                    <tr style="font-weight:800;"><td style="${td} text-align:left;">Jugador</td><td style="${td}">Min</td><td style="${td}">⚽</td><td style="${td}">👟</td><td style="${td}">✅</td><td style="${td}">❌</td><td style="${td}">🎯</td><td style="${td}">🧤</td><td style="${td}"></td></tr>
+                    ${filas.map(f => `<tr><td style="${td} text-align:left; font-weight:700;">${dors[f.n] != null ? dors[f.n] + ' ' : ''}${f.n}</td><td style="${td}">${f.min}'</td><td style="${td}">${f.g || ''}</td><td style="${td}">${f.a || ''}</td><td style="${td}">${f.rec || ''}</td><td style="${td}">${f.per || ''}</td><td style="${td}">${f.tir || ''}</td><td style="${td}">${f.par || ''}</td><td style="${td}">${f.tj}</td></tr>`).join('')}
+                </table></div>
+                <div style="font-weight:800; font-size:0.8rem; margin:14px 0 6px;">Cronología (${ev.length} acciones)</div>
+                <div style="font-size:0.76rem; line-height:1.6;">${ev.map(e => `<div><b style="color:#00897b;">${e.k === 'seg' ? '—' : (Math.floor((e.t || 0) / 60) + 1) + "'"}</b> ${txtEv(e)}</div>`).join('')}</div>
+            </div></div>`;
+        ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-cerrar]')) ov.remove(); });
+        document.body.appendChild(ov);
+    }
+
+    // Reproduce el partido del delegado con el motor de la app
+    function reproducirPartidoDelegado(cd, st) {
+        if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+        enMarcha = false; finalizado = false;
+        const ahora = Date.now();
+        const rFin = st.rFin != null ? st.rFin : st.racum + (st.desde ? Math.floor((ahora - st.desde) / 1000) : 0);
+        const tFin = st.tFin != null ? st.tFin : st.acum + (st.desde ? Math.floor((ahora - st.desde) / 1000) : 0);
+        _reproduciendo = true;
+        try {
+            inicializarEstructuraFija();
+            const s0 = SISTEMAS_JUEGO.find(x => x.id === (st.sis0 || cd.sistema)) || SISTEMAS_JUEGO[0];
+            aplicarSistema(s0, false); sistemaActual = s0;
+            try { localStorage.setItem('hergar_sistema_juego', s0.id); } catch (e) {}
+            nombreRivalActual = cd.rival || 'Rival';
+            document.getElementById('nombre-rival-marcador').innerText = nombreRivalActual;
+            jornada = cd.jornada || '';
+            tipoPartido = cd.tipo || 'liga';
+            document.getElementById('tipo-partido').value = tipoPartido; cambiarTipoPartido();
+            duracionTotalMinutos = cd.duracion || 50;
+            const selD = document.getElementById('duracion-partido'); if (selD) selD.value = duracionTotalMinutos;
+
+            const dors = {}; (cd.plantilla || []).forEach(p => { dors[p.n] = p.d; });
+            const once = st.once || [];
+            jugadores = (st.vinieron || []).map(n => {
+                const jpos = {}, jimp = {}; POSICIONES_CONFIG.forEach(p => { jpos[p.id] = 0; jimp[p.id] = 0; });
+                const pos = once.indexOf(n);
+                return { nombre: n, dorsal: dors[n] !== undefined ? dors[n] : null, enCampo: pos >= 0, posicionActual: pos >= 0 ? pos : null,
+                    goles: 0, golesEnCampoFavor: 0, golesEnCampoContra: 0, puntosImpactoDirecto: 0, asistencias: 0, cambiosRealizados: 0,
+                    tiemposPorPosicion: jpos, impactoPorPosicion: jimp, segundosBanquillo: 0, tarjetasAm: 0, tarjetasRo: 0 };
+            });
+            cornerFavor = 0; cornerContra = 0;
+            document.getElementById('corner-favor-badge').innerText = 0;
+            document.getElementById('corner-contra-badge').innerText = 0;
+
+            tiempoPartidoSegundos = 0; _segundosAcumulados = 0;
+            let r = 0;
+            const avanzar = hasta => { while (r < hasta) { procesarUnSegundo(); tiempoPartidoSegundos++; r++; } };
+            enMarcha = true; // para que cambios y sistemas queden en la cronología como en directo
+            (st.ev || []).forEach(e => {
+                avanzar(e.r || 0);
+                tiempoPartidoSegundos = e.t || 0;
+                aplicarEventoDelegado(e);
+            });
+            avanzar(rFin);
+            tiempoPartidoSegundos = tFin;
+            _segundosAcumulados = tFin;
+            enMarcha = false;
+        } finally {
+            _reproduciendo = false;
+        }
+
+        finalizado = st.fase === 'final';
+        duracionRealMinutos = Math.max(1, Math.round(tiempoPartidoSegundos / 60));
+        _fechaPartidoForzada = cd.fecha || null;
+        const setV = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        setV('input-fecha-setup', cd.fecha || ''); setV('input-rival-setup', nombreRivalActual); setV('input-jornada-setup', jornada);
+        try { localStorage.setItem('hergar_rival_actual', nombreRivalActual); localStorage.setItem('hergar_jornada_actual', jornada); } catch (e) {}
+        try {
+            const todos = (cd.plantilla || []).map(p => p.n);
+            (st.vinieron || []).forEach(n => { if (!todos.includes(n)) todos.push(n); });
+            sincronizarAsistenciaConConvocatoria(todos, st.vinieron || [], cd.fecha);
+        } catch (e) {}
+        const btn = document.getElementById('btn-play');
+        btn.innerText = '▶ INICIAR'; btn.style.background = 'var(--primary)';
+        document.getElementById('marcador-favor').innerText = golesHergar;
+        document.getElementById('marcador-contra').innerText = golesRival;
+        if (finalizado) {
+            trackingRachasPortero.rachasRegistradasSegundos.push(trackingRachasPortero.segundosActualesLimpio);
+            const res = golesHergar > golesRival ? '✅ VICTORIA' : (golesHergar < golesRival ? '❌ DERROTA' : '🤝 EMPATE');
+            document.getElementById('banner-resultado-texto').innerText = `${golesHergar} - ${golesRival} ${res}`;
+            document.getElementById('banner-finalizado').style.display = 'block';
+        }
+        deseleccionarTodo();
+        renderGridSistemas(); actualizarBotonSistemaCampo();
+        renderizarTablero(); actualizarInterfazCronometro(); actualizarBotonDeshacer();
+        guardarEstadoPartidoEmergencia();
+        cambiarTabPrincipal('control');
+        if (finalizado) {
+            document.getElementById('ia-estado-txt').innerText = '';
+            document.getElementById('btn-ia-generar-txt').innerText = '🤖 Generar análisis IA';
+            document.getElementById('spinner-ia').style.display = 'none';
+            document.getElementById('btn-ia-generar').disabled = false;
+            try { sugerirContextoIADesdeLiga(); } catch (e) {}
+            document.getElementById('modal-contexto-ia').style.display = 'flex';
+        }
+        lanzarToastAlerta(finalizado ? '📥 Partido del delegado cargado: revísalo y pulsa 💾 GRABAR PARTIDO' : '📥 Cargado lo que lleva el delegado');
+    }
+
+    function aplicarEventoDelegado(e) {
+        const ANALISIS = { tir: 'tiro', rec: 'recuperacion', per: 'perdida', par: 'parada' };
+        switch (e.k) {
+            case 'gol': registrarAccionGoles(null, e.j, 'g'); if (e.a) registrarAccionGoles(null, e.a, 'a'); break;
+            case 'golR': registrarGolEnContra(); break;
+            case 'sub': {
+                const antes = enMarcha;
+                if (!(e.r > 0)) enMarcha = false; // colocar a alguien antes del pitido no cuenta como cambio
+                ejecutarSustitucionBanquilloPorCampo(e.e, e.p);
+                enMarcha = antes; break;
+            }
+            case 'swap': ejecutarPermutaPosicionesCampo(e.p, e.q); break;
+            case 'am': case 'ro': registrarTarjeta(null, e.j, e.k); break;
+            case 'tir': case 'rec': case 'per': case 'par': registrarEventoAnalisis(null, e.j, ANALISIS[e.k]); break;
+            case 'cf': registrarCorner('favor'); break;
+            case 'cc': registrarCorner('contra'); break;
+            case 'sis': { const s = SISTEMAS_JUEGO.find(x => x.id === e.s); if (s) elegirSistema(s); break; }
+            case 'seg': {
+                const m1 = Math.floor((e.t || 0) / 60);
+                eventosTimeline.push({ minuto: m1, tipo: 'SEGUNDA_PARTE', descripcion: `⏱️ Descanso — inicio 2ª parte (${m1} min jugados en 1ª)` });
+                tiempoPartidoSegundos = Math.floor(duracionTotalMinutos * 60 / 2);
+                break;
+            }
+        }
+    }
+
+    // Al abrir: si el delegado ya ha terminado y no lo has cargado, se avisa
+    async function comprobarDelegadoAlArrancar() {
+        const d = obtenerDelegado(), cfg = obtenerConfigVisor();
+        if (!d || d.abierto === false || !cfg.db) return;
+        try {
+            const stTxt = await leerNodoDelegado(cfg, d.codigo, 'st');
+            if (!stTxt) return;
+            const st = JSON.parse(stTxt);
+            if (st.fase === 'final') {
+                actualizarEstadoDelegado(`🏁 El delegado ha terminado: ${st.gl}-${st.gr} vs ${d.rival}. Pulsa 📥 CARGAR SU PARTIDO`);
+                lanzarToastAlerta(`🤝 El delegado ha terminado el partido vs ${d.rival}: cárgalo en la pestaña Partido`);
+            } else if (st.fase === 'directo') {
+                const seg = st.acum + (st.desde ? Math.floor((Date.now() - st.desde) / 1000) : 0);
+                actualizarEstadoDelegado(`🔴 El delegado está apuntando: ${st.gl}-${st.gr} vs ${d.rival} (min ${Math.floor(seg / 60) + 1})`);
+            }
+        } catch (e) {}
+    }
+
+
     async function compartirEnlaceVisor() {
         const cfg = obtenerConfigVisor();
         if (!cfg.url) { lanzarToastAlerta('⚠️ Pon primero el enlace del visor.'); return; }
@@ -8314,6 +8705,7 @@ No uses markdown, asteriscos, guiones ni numeración. Solo texto plano con los t
     actualizarBotonDeshacer();
     try { cargarHistoricoDesdeStorage(); actualizarEstadoBackup(); avisoBackupAlArrancar(); } catch(eBk) {}
     try { cargarConfigVisorEnPantalla(); actualizarEstadoSync(); } catch(eVis) {}
+    try { actualizarEstadoDelegado(); setTimeout(comprobarDelegadoAlArrancar, 3500); } catch(eDel) {}
     try { cargarClaveIAEnPantalla(); } catch(eIA) {}
     pedirDatosPermanentes();
     registrarServiceWorker();
