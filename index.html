@@ -1226,7 +1226,7 @@
             actualizarInterfazCronometro();
             renderizarTablero();
             if (enMarcha) tickCronometro();
-            lanzarToastAlerta("🔄 Sesión recuperada automáticamente");
+            if (tiempoPartidoSegundos > 0 || golesHergar > 0 || golesRival > 0) lanzarToastAlerta("🔄 Sesión recuperada automáticamente");
             return true;
         } catch (e) {
             console.error("Error recuperando estado de emergencia", e);
@@ -1297,15 +1297,15 @@
                 campoFecha.value = new Date().toLocaleDateString('es-ES');
             }
 
-            let asistentesUltimoPartido = obtenerAsistentesUltimoPartidoRegistrado();
-            if (asistentesUltimoPartido) {
-                activosHoy = asistentesUltimoPartido;
-            } else {
-                let checkasist = localStorage.getItem('hergar_asistencia_hoy');
-                if (checkasist) {
-                    let parsed = JSON.parse(checkasist);
-                    if (Array.isArray(parsed)) activosHoy = parsed;
-                }
+            // Primero la última convocatoria CONFIRMADA en este móvil; si no hay, la última lista de asistencia
+            let checkasist = localStorage.getItem('hergar_asistencia_hoy');
+            if (checkasist) {
+                let parsed = JSON.parse(checkasist);
+                if (Array.isArray(parsed)) activosHoy = parsed;
+            }
+            if (activosHoy.length === 0) {
+                let asistentesUltimoPartido = obtenerAsistentesUltimoPartidoRegistrado();
+                if (asistentesUltimoPartido) activosHoy = asistentesUltimoPartido;
             }
         } catch(e) {
             activosHoy = []; 
@@ -2335,6 +2335,7 @@
             const idxExistente = sesionesAsistencia.findIndex(s => s.fecha === fechaFinal);
             if (idxExistente !== -1) {
                 sesionesAsistencia[idxExistente].registros = registros;
+                sesionesAsistencia[idxExistente].ts = Date.now();
             } else {
                 sesionesAsistencia.push({ fecha: fechaFinal, tipo: 'partido', registros: registros, ts: Date.now() });
             }
@@ -2382,8 +2383,17 @@
         
         clearEstadoEmergencia();
         inyectarPlantillaBase();
+        const rivalConfirmado = nombreRivalActual;
         inicializarEstructuraFija();
+        // inicializarEstructuraFija deja el rival en blanco: se repone
+        if (rivalConfirmado && rivalConfirmado !== 'RIVAL') {
+            nombreRivalActual = rivalConfirmado;
+            document.getElementById('nombre-rival-marcador').innerText = rivalConfirmado;
+        }
+        // Se guarda ya la convocatoria y la colocación: así sobreviven a una recarga
+        guardarEstadoPartidoEmergencia();
         document.getElementById('panel-setup').style.display = "none";
+        lanzarToastAlerta(`✅ Convocatoria guardada: ${jugadores.length} jugadores`);
     }
 
     function obtenerTiempoTotal(j) {
