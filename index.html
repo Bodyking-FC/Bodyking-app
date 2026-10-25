@@ -631,6 +631,7 @@
                     <button style="background:#00796b;" onclick="exportarCSV()">💾 DESCARGAR CSV</button>
                     <button style="background:#d32f2f;" onclick="exportarTemporadaPDF()">📄 PDF TEMPORADA</button>
                 </div>
+                <button style="background:#d32f2f; width:100%; margin-top:6px;" onclick="reabrirPDFPartidoEnPantalla()">📄 PDF + ANÁLISIS IA DEL PARTIDO EN PANTALLA</button>
                 <button style="background:#455a64; width:100%; margin-top:6px;" onclick="abrirPartidoAMano()">✍️ METER UN PARTIDO A MANO (si no se grabó en directo)</button>
             </div>
             <div class="categoria-botones cat-plantilla" style="margin-top:10px; border-left-color:#ff6f00;">
@@ -4976,6 +4977,8 @@
                         style="margin-top:8px; margin-right:6px; background:var(--bk-turq); color:#00332c; border:none; border-radius:6px; padding:6px 10px; font-size:0.7rem; font-weight:900; cursor:pointer;">📋 Ficha del partido</button>
                     <button onclick="event.stopPropagation(); abrirEditorPartido(${historialPartidos.length - 1 - idxRev});"
                         style="margin-top:8px; background:var(--dark-bg); color:var(--bk-turq); border:1px solid var(--bk-turq); border-radius:6px; padding:6px 10px; font-size:0.7rem; font-weight:900; cursor:pointer;">✏️ Corregir datos del partido</button>
+                    <button onclick="event.stopPropagation(); exportarActaPartidoPDF(${historialPartidos.length - 1 - idxRev});"
+                        style="margin-top:8px; margin-left:6px; background:#d32f2f; color:#fff; border:none; border-radius:6px; padding:6px 10px; font-size:0.7rem; font-weight:900; cursor:pointer;">📄 Acta PDF</button>
                     ${htmlInsightsApp(_insTodos[historialPartidos.length - 1 - idxRev])}
                     ${informeHTML}
                 </div>`;
@@ -5778,6 +5781,178 @@
                     <p style="font-size:0.66rem; color:#888; margin:8px 6px 0 6px;">Toca una columna para ordenar y un jugador para ver su detalle.</p>
                 </div>
             </div>`;
+    }
+
+    /* ── ACTA PDF DE UN PARTIDO GRABADO ────────────────────────────
+       Se genera con los datos guardados en el historial, así sirve para
+       cualquier partido: en directo, del delegado o metido a mano. */
+    function exportarActaPartidoPDF(idx) {
+        const p = historialPartidos[idx];
+        if (!p) { lanzarToastAlerta('⚠️ No se encuentra ese partido.'); return; }
+        const jsPDFConstructor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+        if (!jsPDFConstructor) { lanzarToastAlerta('⚠️ Librería jsPDF no disponible.'); return; }
+        try {
+            const doc = new jsPDFConstructor('p', 'mm', 'a4');
+            const _t = doc.text.bind(doc);
+            doc.text = function(text, x, y, opts) {
+                if (typeof text === 'string') text = pdfTxt(text);
+                else if (Array.isArray(text)) text = text.map(t => typeof t === 'string' ? pdfTxt(t) : t);
+                return _t(text, x, y, opts);
+            };
+            const _s = doc.splitTextToSize.bind(doc);
+            doc.splitTextToSize = function(text, w, o) { if (typeof text === 'string') text = pdfTxt(text); return _s(text, w, o); };
+
+            const jugs = (p.jugadores || []).filter(j => (j.minutos || 0) > 0);
+            const mvp = mvpDelPartido(jugs);
+            const tipoTxt = p.tipo === 'liga' ? 'LIGA' : (p.tipo === 'amistoso' ? 'AMISTOSO' : String(p.tipo || '').toUpperCase());
+            const nivelTxt = { 'muy-superior': 'Muy superior', 'superior': 'Superior', 'similar': 'Similar', 'inferior': 'Inferior', 'muy-inferior': 'Muy inferior' }[p.nivelRival] || '';
+
+            // Cabecera
+            doc.setFillColor(211, 47, 47); doc.rect(0, 0, 210, 38, 'F');
+            doc.setFillColor(183, 28, 28); doc.rect(0, 35, 210, 3, 'F');
+            try { doc.addImage(ESCUDO_HERGAR_B64, 'JPEG', 174, 2, 30, 30); } catch (e) {}
+            doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(24);
+            doc.text('BODYKING FC', 14, 16);
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+            doc.text('ACTA DEL PARTIDO', 14, 23);
+            doc.text(`${tipoTxt} | ${p.fecha} | ${p.duracion || '-'} min${p.manual ? ' | metido a mano' : ''}`, 14, 29);
+
+            // Marcador
+            doc.setFillColor(30, 30, 36); doc.rect(12, 46, 186, 18, 'F');
+            doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+            doc.text('BODYKING FC', 22, 57);
+            doc.text(String(p.rival || 'Rival').toUpperCase().substring(0, 16), 188, 57, { align: 'right' });
+            doc.setTextColor(255, 235, 59); doc.setFontSize(16); doc.text(`${p.golesH}`, 90, 58);
+            doc.setTextColor(150, 150, 150); doc.text('vs', 102, 57);
+            doc.setTextColor(239, 83, 80); doc.text(`${p.golesR}`, 116, 58);
+
+            let y = 72;
+            const res = p.golesH > p.golesR ? 'VICTORIA' : (p.golesH < p.golesR ? 'DERROTA' : 'EMPATE');
+            doc.setTextColor(60, 60, 60); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+            doc.text(`Resultado: ${res}${nivelTxt ? '   |   Nivel del rival: ' + nivelTxt : ''}${mvp ? '   |   MVP: ' + mvp.nombre : ''}`, 14, y);
+            y += 10;
+
+            const titulo = (txt, col) => {
+                if (y > 265) { doc.addPage(); y = 20; }
+                doc.setTextColor(...col); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+                doc.text(txt, 12, y);
+                doc.setDrawColor(220, 220, 220); doc.setLineWidth(0.3); doc.line(12, y + 2, 198, y + 2);
+                y += 8;
+            };
+
+            // Goles y tarjetas por minuto
+            const goles = Array.isArray(p.golesMin) ? [...p.golesMin].sort((a, b) => a.min - b.min) : [];
+            const tarj = Array.isArray(p.tarjetas) ? p.tarjetas : [];
+            if (goles.length || tarj.length) {
+                titulo('CRONOLOGIA', [2, 136, 209]);
+                let gf = 0, gc = 0;
+                const lineas = goles.map(g => {
+                    if (g.t === 'F') gf++; else gc++;
+                    return { min: g.min, txt: g.t === 'F' ? `Gol de Bodyking${g.a ? ' (' + g.a + ')' : ''}  ->  ${gf}-${gc}` : `Gol de ${p.rival || 'el rival'}  ->  ${gf}-${gc}`, col: g.t === 'F' ? [46, 125, 50] : [198, 40, 40] };
+                }).concat(tarj.map(t => ({ min: t.minuto, txt: t.tipo === 'TARJETA_RO' ? 'Tarjeta roja' : 'Tarjeta amarilla', col: t.tipo === 'TARJETA_RO' ? [198, 40, 40] : [200, 150, 0] })))
+                  .sort((a, b) => (a.min || 0) - (b.min || 0));
+                doc.setFontSize(9.5);
+                lineas.forEach(l => {
+                    if (y > 280) { doc.addPage(); y = 20; }
+                    doc.setTextColor(80, 80, 80); doc.setFont('helvetica', 'bold'); doc.text(`${l.min != null ? l.min + "'" : '-'}`, 16, y);
+                    doc.setTextColor(...l.col); doc.setFont('helvetica', 'normal'); doc.text(l.txt, 30, y);
+                    y += 6;
+                });
+                y += 4;
+            }
+
+            // Tabla de jugadores
+            titulo('JUGADORES', [211, 47, 47]);
+            const cols = [['#', 14], ['JUGADOR', 22], ['MIN', 82], ['G', 96], ['A', 106], ['TIR', 116], ['REC', 130], ['PER', 144], ['PAR', 158], ['IMP', 174]];
+            const cabecera = () => {
+                doc.setFillColor(240, 240, 240); doc.rect(12, y - 4, 186, 6, 'F');
+                doc.setTextColor(80, 80, 80); doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5);
+                cols.forEach(([t, x]) => doc.text(t, x, y));
+                y += 7;
+            };
+            cabecera();
+            const orden = jugs.slice().sort((a, b) => (b.minutos || 0) - (a.minutos || 0) || (b.goles || 0) - (a.goles || 0));
+            const tot = { goles: 0, asistencias: 0, tiros: 0, recuperaciones: 0, perdidas: 0, paradas: 0 };
+            orden.forEach((j, i) => {
+                if (y > 280) { doc.addPage(); y = 20; cabecera(); }
+                const esMvp = mvp && j.nombre === mvp.nombre;
+                if (esMvp) { doc.setFillColor(224, 247, 244); doc.rect(12, y - 4, 186, 7, 'F'); }
+                else if (i % 2) { doc.setFillColor(250, 250, 250); doc.rect(12, y - 4, 186, 7, 'F'); }
+                doc.setTextColor(33, 33, 33); doc.setFontSize(9);
+                doc.setFont('helvetica', 'normal'); doc.text(j.dorsal != null ? String(j.dorsal) : '', 14, y + 1);
+                doc.setFont('helvetica', 'bold'); doc.text(`${j.nombre}${esMvp ? '  (MVP)' : ''}`.substring(0, 30), 22, y + 1);
+                doc.setFont('helvetica', 'normal');
+                const v = k => (j[k] || 0);
+                doc.text(`${j.minutos || 0}`, 82, y + 1);
+                ['goles', 'asistencias', 'tiros', 'recuperaciones', 'perdidas', 'paradas'].forEach((k, n) => {
+                    tot[k] += v(k);
+                    doc.text(v(k) ? String(v(k)) : '-', [96, 106, 116, 130, 144, 158][n], y + 1);
+                });
+                const imp = Math.round((j.impacto || 0) * 10) / 10;
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(...(imp > 0 ? [46, 125, 50] : imp < 0 ? [198, 40, 40] : [120, 120, 120]));
+                doc.text(`${imp > 0 ? '+' : ''}${imp}`, 174, y + 1);
+                y += 7;
+            });
+            if (y > 280) { doc.addPage(); y = 20; }
+            doc.setDrawColor(180, 180, 180); doc.line(12, y - 3.5, 198, y - 3.5);
+            doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5);
+            doc.text('EQUIPO', 22, y + 1);
+            ['goles', 'asistencias', 'tiros', 'recuperaciones', 'perdidas', 'paradas'].forEach((k, n) => doc.text(String(tot[k]), [96, 106, 116, 130, 144, 158][n], y + 1));
+            y += 8;
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
+            doc.text('G goles - A asistencias - TIR tiros - REC recuperaciones - PER perdidas - PAR paradas - IMP impacto', 14, y);
+            y += 10;
+
+            // Informe IA guardado (si lo hay)
+            const inf = obtenerInformeIA(p.fecha, p.rival);
+            if (inf && inf.texto) {
+                titulo('ANALISIS IA', [106, 27, 154]);
+                doc.setTextColor(50, 50, 50); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+                String(inf.texto).split('\n').forEach(par => {
+                    const limpio = par.trim();
+                    if (!limpio) { y += 2; return; }
+                    const esTit = limpio === limpio.toUpperCase() && limpio.length < 40 && /[A-Z]/.test(limpio);
+                    doc.setFont('helvetica', esTit ? 'bold' : 'normal');
+                    doc.splitTextToSize(limpio, 182).forEach(l => {
+                        if (y > 282) { doc.addPage(); y = 20; }
+                        doc.text(l, 14, y); y += 5;
+                    });
+                    if (esTit) y += 1;
+                });
+            }
+
+            const nPag = doc.getNumberOfPages();
+            for (let i = 1; i <= nPag; i++) {
+                doc.setPage(i);
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(160, 160, 160);
+                doc.text(`Bodyking FC - Acta vs ${p.rival} - ${p.fecha} - pag. ${i}/${nPag}`, 105, 292, { align: 'center' });
+            }
+
+            const limpia = s => String(s || '').replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s-]/g, '').trim().replace(/\s+/g, '_');
+            const nombreArchivo = `Acta_${limpia(String(p.fecha).replace(/\//g, '-'))}_vs_${limpia(p.rival) || 'Rival'}.pdf`;
+            const blob = doc.output('blob');
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = nombreArchivo;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+            lanzarToastAlerta('📄 Acta descargada: ' + nombreArchivo);
+        } catch (e) {
+            console.error(e);
+            lanzarToastAlerta('❌ Error en el acta: ' + e.message);
+        }
+    }
+
+    // Vuelve a abrir el PDF completo (con análisis IA) del partido que hay en pantalla
+    function reabrirPDFPartidoEnPantalla() {
+        if (!finalizado) { lanzarToastAlerta('ℹ️ Solo para el partido que hay en pantalla, una vez finalizado. Para otros: Temporada → Partidos → 📄 Acta PDF.'); return; }
+        document.getElementById('ia-estado-txt').innerText = '';
+        document.getElementById('btn-ia-generar-txt').innerText = '🤖 Generar análisis IA';
+        document.getElementById('spinner-ia').style.display = 'none';
+        document.getElementById('btn-ia-generar').disabled = false;
+        try { sugerirContextoIADesdeLiga(); } catch (e) {}
+        document.getElementById('modal-contexto-ia').style.display = 'flex';
     }
 
     function abrirDetalleJugadorPartido(idx, nombre) {
