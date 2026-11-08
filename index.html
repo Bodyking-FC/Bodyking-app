@@ -5035,7 +5035,7 @@
     function abrirEditorPartido(idx) {
         const p = historialPartidos[idx];
         if (!p) return;
-        _edPartido = { idx, golesMin: (p.golesMin || []).map(g => ({ ...g })) };
+        _edPartido = { idx, golesMin: (p.golesMin || []).map(g => ({ ...g })), nuevos: [] };
         let ov = document.getElementById('modal-editor-partido');
         if (!ov) {
             ov = document.createElement('div');
@@ -5045,16 +5045,9 @@
             document.body.appendChild(ov);
         }
         const niveles = [['','— sin asignar —'],['muy-superior','Muy superior'],['superior','Superior / Difícil'],['similar','Similar al nuestro'],['inferior','Inferior / Asequible'],['muy-inferior','Muy inferior']];
-        const inpNum = (campo, i, val) => `<input type="number" inputmode="numeric" min="0" data-campo="${campo}" data-i="${i}" value="${val || 0}" style="width:100%; box-sizing:border-box; padding:5px 2px; text-align:center; font-size:0.85rem; font-weight:700; border:1px solid var(--border-color); border-radius:6px; background:var(--card-bg); color:var(--texto-general);">`;
-        const filas = (p.jugadores || []).map((j, i) => `
-            <tr>
-                <td style="font-size:0.78rem; font-weight:700; padding:4px 4px 4px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;">${_escHtml(j.nombre)}<div style="font-size:0.62rem; color:#888; font-weight:400;">${j.minutos || 0}'</div></td>
-                <td style="padding:2px;">${inpNum('goles', i, j.goles)}</td>
-                <td style="padding:2px;">${inpNum('asistencias', i, j.asistencias)}</td>
-                <td style="padding:2px;">${inpNum('recuperaciones', i, j.recuperaciones)}</td>
-                <td style="padding:2px;">${inpNum('perdidas', i, j.perdidas)}</td>
-                <td style="padding:2px;">${inpNum('tiros', i, j.tiros)}</td>
-            </tr>`).join('');
+        const filas = (p.jugadores || []).map((j, i) => edFilaJugador(j.nombre, (j.tiemposPorPosicion || {})[0] >= 60 ? '🧤 portería' : '', `data-i="${i}"`, j)).join('');
+        const enPartido = new Set((p.jugadores || []).map(j => j.nombre));
+        const disponibles = (localStorage.getItem('hergar_nombres_plantilla') || nombresPlantillaCompleta || '').split(',').map(extraerNombreLimpio).filter(n => n && !enPartido.has(n));
         const estiloInp = 'width:100%; box-sizing:border-box; padding:7px; font-size:0.85rem; border:1px solid var(--border-color); border-radius:6px; background:var(--card-bg); color:var(--texto-general);';
         ov.innerHTML = `
             <div style="background:var(--panel-bg); color:var(--texto-general); max-width:480px; width:94%; margin:0 auto; border-radius:14px; overflow:hidden; border-top:4px solid var(--bk-turq);">
@@ -5063,9 +5056,10 @@
                     <button onclick="cerrarEditorPartido()" style="background:none; border:none; color:#fff; font-size:1.3rem; cursor:pointer; padding:0 4px;">✕</button>
                 </div>
                 <div style="padding:14px;">
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+                    <div style="display:grid; grid-template-columns:1.4fr 1.1fr 0.8fr; gap:8px; margin-bottom:8px;">
                         <label style="font-size:0.7rem; color:#888;">Rival<input id="ed-rival" value="${_escHtml(p.rival)}" style="${estiloInp}"></label>
                         <label style="font-size:0.7rem; color:#888;">Fecha<input id="ed-fecha" value="${_escHtml(p.fecha)}" style="${estiloInp}"></label>
+                        <label style="font-size:0.7rem; color:#888;">Duración<input id="ed-duracion" type="number" inputmode="numeric" min="1" max="120" value="${p.duracion || duracionTotalMinutos || 50}" style="${estiloInp} font-weight:900; text-align:center;"></label>
                     </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr 1.4fr; gap:8px; margin-bottom:14px;">
                         <label style="font-size:0.7rem; color:#888;">Goles Bodyking<input id="ed-golesH" type="number" inputmode="numeric" min="0" value="${p.golesH}" style="${estiloInp} font-weight:900; text-align:center;"></label>
@@ -5096,15 +5090,26 @@
 
                     <div style="font-size:0.78rem; font-weight:900; margin-bottom:6px;">👥 Estadísticas por jugador</div>
                     <div style="overflow-x:auto;">
-                    <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
-                        <colgroup><col style="width:30%"><col><col><col><col><col></colgroup>
+                    <table style="width:100%; border-collapse:collapse; table-layout:fixed; min-width:330px;">
+                        <colgroup><col style="width:24%"><col style="width:13%"><col><col><col><col><col><col></colgroup>
                         <thead><tr style="font-size:0.72rem; color:#888;">
-                            <th style="text-align:left; font-weight:600;">Jugador</th><th title="Goles">⚽</th><th title="Asistencias">👟</th><th title="Recuperaciones">✅</th><th title="Pérdidas">❌</th><th title="Tiros">🎯</th>
+                            <th style="text-align:left; font-weight:600;">Jugador</th><th title="Minutos jugados">⏱️</th><th title="Goles">⚽</th><th title="Asistencias">👟</th><th title="Recuperaciones">✅</th><th title="Pérdidas">❌</th><th title="Tiros">🎯</th><th title="Paradas">🧤</th>
                         </tr></thead>
                         <tbody id="ed-tabla-jug">${filas}</tbody>
                     </table>
                     </div>
-                    <p style="font-size:0.68rem; color:#888; line-height:1.4; margin:10px 0 0 0;">Los cambios en goles y asistencias ajustan el impacto del jugador, el acumulado de temporada y los MVP de bloque. Cambiar el marcador no reparte el +/- entre quienes estaban en pista, porque ese dato no se guarda.</p>
+
+                    <div style="background:var(--card-bg); border:1px solid var(--border-color); border-radius:10px; padding:10px; margin-top:10px;">
+                        <div style="font-size:0.78rem; font-weight:900; margin-bottom:4px;">➕ Jugó y no aparece</div>
+                        <div style="font-size:0.68rem; color:#888; margin-bottom:8px; line-height:1.4;">Añádelo a la tabla y ponle sus minutos y acciones.</div>
+                        <div style="display:grid; grid-template-columns:1.5fr 1fr auto; gap:6px; align-items:center;">
+                            <input id="ed-add-nombre" list="ed-add-lista" placeholder="Jugador" autocomplete="off" style="${estiloInp}">
+                            <datalist id="ed-add-lista">${disponibles.map(n => `<option value="${_escHtml(n)}">`).join('')}</datalist>
+                            <select id="ed-add-pos" style="${estiloInp}"><option value="campo">De campo</option><option value="portero">🧤 Portero</option></select>
+                            <button onclick="edAnadirJugador()" style="background:var(--bk-turq); color:#00332c; border:none; border-radius:6px; padding:8px 10px; font-size:0.75rem; font-weight:900; cursor:pointer;">Añadir</button>
+                        </div>
+                    </div>
+                    <p style="font-size:0.68rem; color:#888; line-height:1.4; margin:10px 0 0 0;">Los cambios en minutos, goles, asistencias y paradas ajustan el impacto, el acumulado de temporada y los MVP de bloque. Los minutos que sumes van a la posición donde más jugó. Cambiar el marcador no reparte el +/- entre quienes estaban en pista, porque ese dato no se guarda.</p>
                     <div style="display:grid; grid-template-columns:1fr 2fr; gap:8px; margin-top:14px;">
                         <button onclick="cerrarEditorPartido()" style="background:#607d8b; color:#fff; border:none; border-radius:8px; padding:11px; font-weight:900; cursor:pointer;">Cancelar</button>
                         <button onclick="guardarEditorPartido()" style="background:var(--bk-turq); color:#00332c; border:none; border-radius:8px; padding:11px; font-weight:900; cursor:pointer;">💾 Guardar cambios</button>
@@ -5114,6 +5119,41 @@
         ov.style.display = 'block';
         ['ed-golesH','ed-golesR'].forEach(id => document.getElementById(id).addEventListener('input', edRenderGolesMin));
         edRenderGolesMin();
+    }
+
+    // Fila de la tabla del editor (attrs = data-i="N" para los del partido, data-n="N" para los añadidos)
+    function edFilaJugador(nombre, sub, attrs, j) {
+        const inp = (campo, val, min) => `<input type="number" inputmode="numeric" min="${min}" data-campo="${campo}" ${attrs} value="${val || 0}" style="width:100%; box-sizing:border-box; padding:5px 1px; text-align:center; font-size:0.85rem; font-weight:700; border:1px solid var(--border-color); border-radius:6px; background:var(--card-bg); color:var(--texto-general);">`;
+        return `
+            <tr>
+                <td style="font-size:0.78rem; font-weight:700; padding:4px 4px 4px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_escHtml(nombre)}${sub ? `<div style="font-size:0.6rem; color:#888; font-weight:400;">${sub}</div>` : ''}</td>
+                <td style="padding:2px;">${inp('minutos', j.minutos, 1).replace('font-weight:700;', 'font-weight:900; border-color:var(--bk-turq);')}</td>
+                <td style="padding:2px;">${inp('goles', j.goles, 0)}</td>
+                <td style="padding:2px;">${inp('asistencias', j.asistencias, 0)}</td>
+                <td style="padding:2px;">${inp('recuperaciones', j.recuperaciones, 0)}</td>
+                <td style="padding:2px;">${inp('perdidas', j.perdidas, 0)}</td>
+                <td style="padding:2px;">${inp('tiros', j.tiros, 0)}</td>
+                <td style="padding:2px;">${inp('paradas', j.paradas, 0)}</td>
+            </tr>`;
+    }
+
+    function edAnadirJugador() {
+        if (!_edPartido) return;
+        const p = historialPartidos[_edPartido.idx];
+        const inp = document.getElementById('ed-add-nombre');
+        const nombre = (inp.value || '').trim();
+        if (!nombre) { lanzarToastAlerta('⚠️ Escribe o elige el jugador.'); return; }
+        if ((p.jugadores || []).some(j => j.nombre === nombre) || _edPartido.nuevos.some(n => n.nombre === nombre)) {
+            lanzarToastAlerta(`⚠️ ${nombre} ya está en la tabla.`); return;
+        }
+        const portero = document.getElementById('ed-add-pos').value === 'portero';
+        const k = _edPartido.nuevos.length;
+        _edPartido.nuevos.push({ nombre, portero });
+        const dur = parseInt(document.getElementById('ed-duracion').value, 10) || p.duracion || 50;
+        document.getElementById('ed-tabla-jug').insertAdjacentHTML('beforeend',
+            edFilaJugador(nombre, portero ? '🧤 nuevo' : '➕ nuevo', `data-n="${k}"`, { minutos: Math.min(10, dur) }));
+        inp.value = '';
+        lanzarToastAlerta(`➕ ${nombre} añadido: ponle sus minutos.`);
     }
 
     function edRenderGolesMin() {
@@ -5253,31 +5293,84 @@
         const p = historialPartidos[_edPartido.idx];
         if (!p) { cerrarEditorPartido(); return; }
         const esLiga = p.tipo === 'liga';
-        const campos = ['goles', 'asistencias', 'recuperaciones', 'perdidas', 'tiros'];
-        const campoAcum = { goles: 'goles', asistencias: 'asistencias', recuperaciones: 'recuperaciones', perdidas: 'perdidas', tiros: 'tiros' };
+        const campos = ['goles', 'asistencias', 'recuperaciones', 'perdidas', 'tiros', 'paradas'];
+        const campoAcum = { goles: 'goles', asistencias: 'asistencias', recuperaciones: 'recuperaciones', perdidas: 'perdidas', tiros: 'tiros', paradas: 'paradasPorteria' };
+        const r1 = x => Math.round(x * 10) / 10;
 
-        // Leer valores nuevos
+        // Leer valores nuevos (los del partido y los jugadores añadidos)
         const nuevos = (p.jugadores || []).map(() => ({}));
+        const anadidos = (_edPartido.nuevos || []).map(x => ({ ...x }));
         document.querySelectorAll('#ed-tabla-jug input[data-campo]').forEach(inp => {
             const v = Math.max(0, parseInt(inp.value, 10) || 0);
-            nuevos[parseInt(inp.dataset.i, 10)][inp.dataset.campo] = v;
+            if (inp.dataset.i !== undefined) nuevos[parseInt(inp.dataset.i, 10)][inp.dataset.campo] = v;
+            else if (inp.dataset.n !== undefined) anadidos[parseInt(inp.dataset.n, 10)][inp.dataset.campo] = v;
         });
         const golesH = Math.max(0, parseInt(document.getElementById('ed-golesH').value, 10) || 0);
         const golesR = Math.max(0, parseInt(document.getElementById('ed-golesR').value, 10) || 0);
-        const sumaGoles = nuevos.reduce((s, n) => s + (n.goles || 0), 0);
+        const durAntes = p.duracion || duracionTotalMinutos || 50;
+        const durNueva = Math.min(120, Math.max(1, parseInt(document.getElementById('ed-duracion').value, 10) || durAntes));
+
+        // Comprobaciones
+        const sinMin = [...(p.jugadores || []).filter((j, i) => !(nuevos[i].minutos > 0)), ...anadidos.filter(a => !(a.minutos > 0))].map(x => x.nombre);
+        if (sinMin.length) { lanzarToastAlerta(`⚠️ Pon al menos 1 minuto a: ${sinMin.join(', ')}`); return; }
+        const sumaGoles = [...nuevos, ...anadidos].reduce((s, n) => s + (n.goles || 0), 0);
         if (sumaGoles > golesH) {
             const seguir = await hergarConfirm(`⚠️ Los goles de los jugadores suman ${sumaGoles} pero el marcador dice ${golesH}. ¿Guardar igualmente?`, 'Guardar', 'var(--primary)');
             if (!seguir) return;
         }
+        const pasados = [...(p.jugadores || []).map((j, i) => ({ nombre: j.nombre, minutos: nuevos[i].minutos })), ...anadidos].filter(x => x.minutos > durNueva).map(x => `${x.nombre} (${x.minutos}')`);
+        if (pasados.length) {
+            const seguir = await hergarConfirm(`⚠️ Tienen más minutos que la duración del partido (${durNueva}'):\n${pasados.join(', ')}\n\n¿Guardar igualmente?`, 'Guardar', 'var(--primary)');
+            if (!seguir) return;
+        }
 
         const cambios = [];
+
+        // Duración del partido: cuenta para la media por partido de todos los que jugaron
+        if (durNueva !== durAntes) {
+            const dDur = durNueva - durAntes;
+            if (esLiga) (p.jugadores || []).forEach(j => {
+                const acc = historicoLigaAcumulado[j.nombre];
+                if (!acc) return;
+                acc.minutosDuracionAcumulados = Math.max(0, (acc.minutosDuracionAcumulados || 0) + dDur);
+                if (((j.tiemposPorPosicion || {})[0] || 0) >= 60) acc.duracionPorteriaAcumulada = Math.max(0, (acc.duracionPorteriaAcumulada || 0) + dDur);
+            });
+            p.duracion = durNueva;
+            cambios.push(`duración ${durAntes}' → ${durNueva}'`);
+        }
+
         (p.jugadores || []).forEach((j, i) => {
             const n = nuevos[i];
+            const acc = esLiga ? historicoLigaAcumulado[j.nombre] : null;
+
+            // Minutos: la diferencia va a la posición donde más jugó
+            const dMin = (n.minutos || 0) - (j.minutos || 0);
+            if (dMin !== 0) {
+                j.tiemposPorPosicion = j.tiemposPorPosicion || {};
+                const orden = Object.keys(j.tiemposPorPosicion).sort((a, b) => (j.tiemposPorPosicion[b] || 0) - (j.tiemposPorPosicion[a] || 0));
+                if (orden.length === 0) orden.push('4');
+                let resto = dMin * 60;
+                const porPos = {};
+                if (resto > 0) porPos[orden[0]] = resto;
+                else orden.forEach(pos => { if (resto === 0) return; const quita = Math.max(resto, -(j.tiemposPorPosicion[pos] || 0)); if (quita) porPos[pos] = quita; resto -= quita; });
+                Object.entries(porPos).forEach(([pos, s]) => {
+                    j.tiemposPorPosicion[pos] = Math.max(0, (j.tiemposPorPosicion[pos] || 0) + s);
+                    if (acc) {
+                        acc.tiemposPorPosicion = acc.tiemposPorPosicion || {};
+                        acc.tiemposPorPosicion[pos] = Math.max(0, (acc.tiemposPorPosicion[pos] || 0) + s);
+                        if (String(pos) === '0') acc.minutosPorteria = Math.max(0, (acc.minutosPorteria || 0) + Math.round(s / 60));
+                    }
+                });
+                j.minutos = n.minutos;
+                if (acc) acc.minutosTotales = Math.max(0, (acc.minutosTotales || 0) + dMin);
+                cambios.push(`${j.nombre} minutos ${dMin > 0 ? '+' : ''}${dMin}`);
+            }
+
             const dGol = (n.goles || 0) - (j.goles || 0);
             const dAs = (n.asistencias || 0) - (j.asistencias || 0);
+            const dPar = (n.paradas || 0) - (j.paradas || 0);
             const impAntes = j.impacto || 0;
-            const impDespues = Math.max(-5, impAntes + dGol * 1 + dAs * 0.5);
-            const acc = esLiga ? historicoLigaAcumulado[j.nombre] : null;
+            const impDespues = r1(Math.max(-5, impAntes + dGol * 1 + dAs * 0.5 + dPar * IMPACTO_POR_PARADA));
             campos.forEach(c => {
                 const d = (n[c] || 0) - (j[c] || 0);
                 if (d === 0) return;
@@ -5287,9 +5380,59 @@
             });
             if (impDespues !== impAntes) {
                 j.impacto = impDespues;
-                if (acc) acc.impactoTotalAcumulado = (acc.impactoTotalAcumulado || 0) + (impDespues - impAntes);
+                if (acc) acc.impactoTotalAcumulado = r1((acc.impactoTotalAcumulado || 0) + (impDespues - impAntes));
             }
         });
+
+        // Jugadores que jugaron y no aparecían
+        if (anadidos.length) {
+            const tokens = (localStorage.getItem('hergar_nombres_plantilla') || nombresPlantillaCompleta || '').split(',').map(parsearJugadorToken);
+            anadidos.forEach(a => {
+                const pos = a.portero ? 0 : 4;
+                const seg = a.minutos * 60;
+                const imp = r1(Math.max(-5, (a.goles || 0) + 0.5 * (a.asistencias || 0) + IMPACTO_POR_PARADA * (a.paradas || 0)));
+                const tok = tokens.find(t => t.nombre === a.nombre);
+                (p.jugadores = p.jugadores || []).push({
+                    nombre: a.nombre, dorsal: tok ? tok.dorsal : null, minutos: a.minutos,
+                    goles: a.goles || 0, asistencias: a.asistencias || 0, perdidas: a.perdidas || 0, recuperaciones: a.recuperaciones || 0,
+                    tiros: a.tiros || 0, paradas: a.paradas || 0, impacto: imp, bonoPorteria: 0,
+                    golesFavorPista: 0, golesContraPista: 0, tiemposPorPosicion: { [pos]: seg }
+                });
+                if (esLiga) {
+                    const H = historicoLigaAcumulado;
+                    const acc = H[a.nombre] = H[a.nombre] || { minutosTotales: 0, goles: 0, asistencias: 0, impactoTotalAcumulado: 0, partidosJugados: 0 };
+                    acc.minutosTotales = (acc.minutosTotales || 0) + a.minutos;
+                    acc.partidosJugados = (acc.partidosJugados || 0) + 1;
+                    acc.minutosDuracionAcumulados = (acc.minutosDuracionAcumulados || 0) + durNueva;
+                    acc.impactoTotalAcumulado = r1((acc.impactoTotalAcumulado || 0) + imp);
+                    ['goles', 'asistencias', 'perdidas', 'recuperaciones', 'tiros'].forEach(c => { acc[c] = (acc[c] || 0) + (a[c] || 0); });
+                    acc.tiemposPorPosicion = acc.tiemposPorPosicion || {};
+                    acc.tiemposPorPosicion[pos] = (acc.tiemposPorPosicion[pos] || 0) + seg;
+                    acc.impactoPorPosicion = acc.impactoPorPosicion || {};
+                    acc.impactoPorPosicion[pos] = r1((acc.impactoPorPosicion[pos] || 0) + imp);
+                    if (a.portero) {
+                        acc.minutosPorteria = (acc.minutosPorteria || 0) + a.minutos;
+                        acc.paradasPorteria = (acc.paradasPorteria || 0) + (a.paradas || 0);
+                        acc.partidosPorteria = (acc.partidosPorteria || 0) + 1;
+                        acc.duracionPorteriaAcumulada = (acc.duracionPorteriaAcumulada || 0) + durNueva;
+                    } else if (a.paradas) {
+                        acc.paradasPorteria = (acc.paradasPorteria || 0) + a.paradas;
+                    }
+                }
+                // Asistencia de ese día
+                try {
+                    cargarAsistenciaDesdeStorage();
+                    const normF = f => String(f || '').trim().split('/').map(x => String(parseInt(x, 10))).join('/');
+                    const ses = sesionesAsistencia.find(x => normF(x.fecha) === normF(p.fecha));
+                    if (ses) {
+                        const r = (ses.registros || []).find(x => x.nombre === a.nombre);
+                        if (r) r.concepto = 'asistio'; else (ses.registros = ses.registros || []).push({ nombre: a.nombre, concepto: 'asistio', nota: '' });
+                        guardarAsistenciaEnStorage();
+                    }
+                } catch (e) {}
+                cambios.push(`+ ${a.nombre} (${a.minutos}')`);
+            });
+        }
 
         // Datos generales del partido
         const rivalAntes = p.rival, fechaAntes = p.fecha;
